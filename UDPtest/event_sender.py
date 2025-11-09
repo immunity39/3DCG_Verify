@@ -2,23 +2,49 @@ import socket
 import time
 import json
 
-# ====== 設定 ======
-UDP_IP = "127.0.0.1"  # Unityの実行環境IP（同一PCならlocalhostでOK）
-UDP_PORT = 5005
+# --- 設定 ---
+HOST = "127.0.0.1"  # 送信先 (localhost)
+PORT = 5005         # 送信ポート
+INTERVAL = 7        # 送信間隔 (秒)
+# --- ---
 
-# ====== ソケット初期化 ======
+# UDPソケットの作成
+# AF_INET = IPv4, SOCK_DGRAM = UDP
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-# ====== 疑似イベント送信ループ ======
-while True:
-    # Startイベント送信
-    start_event = {"event": "start", "timestamp": time.time()}
-    sock.sendto(json.dumps(start_event).encode('utf-8'), (UDP_IP, UDP_PORT))
-    print("Sent: START")
-    time.sleep(2)  # 2秒間"接触中"
+print(f"UDP Sender started.")
+print(f"Sending to {HOST}:{PORT} every {INTERVAL} seconds.")
+print("Press Ctrl+C to stop.")
 
-    # Endイベント送信
-    end_event = {"event": "end", "timestamp": time.time()}
-    sock.sendto(json.dumps(end_event).encode('utf-8'), (UDP_IP, UDP_PORT))
-    print("Sent: END")
-    time.sleep(2)  # 次の周期まで待機
+event_type = "start"
+
+try:
+    while True:
+        # 1. 送信するJSONデータを構築
+        data = {"event": event_type}
+        
+        # 2. データをJSON文字列に変換
+        message = json.dumps(data)
+        
+        # 3. データをUTF-8バイトにエンコードして送信
+        sock.sendto(message.encode('utf-8'), (HOST, PORT))
+        
+        print(f"Sent: {message}")
+
+        # 4. イベントタイプを切り替える
+        if event_type == "start":
+            event_type = "end"
+        else:
+            event_type = "start"
+
+        # 5. 指定された間隔（7秒）待機
+        time.sleep(INTERVAL)
+
+except KeyboardInterrupt:
+    print("\nSender stopped by user.")
+except Exception as e:
+    print(f"An error occurred: {e}")
+finally:
+    # スクリプト終了時にソケットを閉じる
+    sock.close()
+    print("Socket closed.")
