@@ -1,28 +1,57 @@
 import socket
 import time
 import json
+import keyboard  # keyboardライブラリをインポート
 
-# ====== 設定 ======
-UDP_IP = "127.0.0.1"  # Unityの実行環境IP（同一PCならlocalhostでOK）
-UDP_PORT = 5005
+# --- 設定 ---
+HOST = "127.0.0.1"  # 送信先 (localhost)
+PORT = 5005         # 送信ポート
+SEND_INTERVAL = 0.05 # 送信間隔 (秒) ... 1秒間に20回更新
+# --- ---
 
-def main():
-    # ====== ソケット初期化 ======
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+server_address = (HOST, PORT)
 
-    # ====== 疑似イベント送信ループ ======
+print(f"UDP Sender started.")
+print(f"Sending to {HOST}:{PORT} at {1/SEND_INTERVAL:.0f} Hz.")
+print("Hold [Spacebar] to simulate 'contact'.")
+print("Press Ctrl+C to stop.")
+
+last_event = "" # 最後のイベント状態を記憶
+
+try:
     while True:
-        # Startイベント送信
-        start_event = {"event": "start", "timestamp": time.time()}
-        sock.sendto(json.dumps(start_event).encode('utf-8'), (UDP_IP, UDP_PORT))
-        print("Sent: START")
-        time.sleep(7)  # 2秒間"接触中"
+        # 1. スペースキーが押されているか判定
+        if keyboard.is_pressed('space'):
+            current_event = "contact_ongoing"
+        else:
+            current_event = "no_contact"
+            
+        # 2. 状態が変化したか、"contact_ongoing"が継続している場合のみ送信
+        #    (no_contactを送り続ける必要はないため)
+        #    -> 変更：常時送信する（Unity側が途切れたことを検知できるように）
+        # if current_event != last_event or current_event == "contact_ongoing":
+        
+        # 3. 送信するJSONデータを構築
+        data = {"event": current_event}
+        
+        # 4. データをJSON文字列に変換し、送信
+        message = json.dumps(data)
+        sock.sendto(message.encode('utf-8'), server_address)
 
-        # Endイベント送信
-        end_event = {"event": "end", "timestamp": time.time()}
-        sock.sendto(json.dumps(end_event).encode('utf-8'), (UDP_IP, UDP_PORT))
-        print("Sent: END")
-        time.sleep(7)  # 次の周期まで待機
+        # 状態を更新
+        last_event = current_event
+        
+        # 5. 短い待機
+        time.sleep(SEND_INTERVAL)
 
-if __name__ == "__main__":
-    main()
+except KeyboardInterrupt:
+    print("\nSender stopped by user.")
+except Exception as e:
+    print(f"An error occurred: {e}")
+finally:
+    # 終了時に "no_contact" (または "end") を送信
+    message = json.dumps({"event": "no_contact"})
+    sock.sendto(message.encode('utf-8'), server_address)
+    sock.close()
+    print("Socket closed.")
