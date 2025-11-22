@@ -14,5 +14,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   StereoRendering: 2
   InitialTrackingType: 0
+  InitialInputSource: 1
+  VirtualController: {fileID: 0}
+  SupportMultiResume: 1
+  AddtionalPermissions:
+  - RECORD_AUDIO
+  - FOREGROUND_SERVICE_MEDIA_PROJECTION
   SupportDevices: 0100000002000000
   LicenseAsset: {fileID: 0}
