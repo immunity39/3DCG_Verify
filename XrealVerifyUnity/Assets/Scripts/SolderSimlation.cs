@@ -4,6 +4,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using TMPro; // (修正点3) TextMeshProを使用するために追加
+using System.Text; // (修正点3) StringBuilderを使用するために追加
 
 public class SolderSimulator : MonoBehaviour
 {
@@ -11,31 +13,28 @@ public class SolderSimulator : MonoBehaviour
     [Header("UDP Settings")]
     public int port = 5005;
 
-    // --- 2. ハンダ付け物理設定 (ステップ2) ---
+    // --- 2. ハンダ付け物理設定 ---
     [Header("Soldering Physics")]
-    public float baseGrowthRate = 1.0f; // ハンダの基本増加量 (体積/秒)
-    
-    [Tooltip("温度(X軸)と熱効率(Y軸, 0-1)のマッピング。例: 350℃で1.0")]
+    public float baseGrowthRate = 1.0f;
     public AnimationCurve temperatureCurve;
-    
-    [Tooltip("角度(0-90度)と面積効率(0-1)のマッピング。例: 45度で1.0")]
-    public AnimationCurve angleCurve; // 角度もカーブで設定可能に
+    public AnimationCurve angleCurve; 
 
-    // --- 3. 描画設定 (ステップ3) ---
+    // --- 3. 描画設定 ---
     [Header("Rendering")]
-    public Material solderMaterial; // 頂点変位シェーダーが適用されたマテリアル
-    
-    [Tooltip("シェーダーに渡す膨張スケール")]
+    public Material solderMaterial; 
     public float displacementScale = 0.1f;
 
-    // --- 4. 判定設定 (ステップ4) ---
+    // --- 4. 判定設定 ---
     [Header("Solder Judgment")]
     public float minRequiredVolume = 1.5f;
     public float maxAllowedVolume = 3.0f;
-    public float minContactTime = 2.0f; // 最低限必要な接触時間 (秒)
-    
-    [Tooltip("全体の接触時間のうち、不適正な温度だった時間の許容割合 (0.0 - 1.0)")]
-    public float maxBadTempRatio = 0.3f; // 30%
+    public float minContactTime = 2.0f;
+    public float maxBadTempRatio = 0.3f;
+
+    // --- 5. UI設定 (修正点3) ---
+    [Header("UI")]
+    [Tooltip("デバッグ情報を表示するTextMeshProのUI要素")]
+    public TextMeshProUGUI debugText;
 
     // --- UDP受信スレッド関連 ---
     private Thread receiveThread;
@@ -45,10 +44,16 @@ public class SolderSimulator : MonoBehaviour
     // --- 判定用 統計データ ---
     private float totalSolderVolume = 0.0f;
     private float totalContactTime = 0.0f;
-    private float timeInBadTempRange = 0.0f; // 不適正な温度だった累積時間
-    private bool needsJudging = false; // 判定が必要かどうかのフラグ
+    private float timeInBadTempRange = 0.0f;
+    private bool needsJudging = false; // (修正点2) 「一度でも接触したか」のフラグ
 
-    // JSONパース用クラス (Pythonのキーと一致させる)
+    // --- (修正点1) Renderer参照 ---
+    private Renderer solderRenderer;
+    
+    // (修正点3) UI更新用
+    private StringBuilder uiStringBuilder = new StringBuilder(256);
+
+    // JSONパース用クラス
     [System.Serializable]
     private class UdpEvent
     {
@@ -59,14 +64,30 @@ public class SolderSimulator : MonoBehaviour
 
     void Start()
     {
-        // マテリアルが設定されていなければ、自身のRendererから取得
+        // (修正点1) Rendererを取得し、初期状態を非表示にする
+        solderRenderer = GetComponent<Renderer>();
+        if (solderRenderer == null)
+        {
+            Debug.LogError("Rendererが見つかりません。");
+        }
+        else
+        {
+            solderRenderer.enabled = false;
+        }
+
         if (solderMaterial == null)
         {
-            solderMaterial = GetComponent<Renderer>().material;
+            solderMaterial = solderRenderer.material;
         }
         
         // 初期化: ハンダ量を0に
         UpdateSolderVisuals();
+        
+        // (修正点3) UIの初期表示
+        if (debugText != null)
+        {
+            UpdateDebugUI(latestEventData);
+        }
         
         // 受信スレッド開始
         receiveThread = new Thread(new ThreadStart(ReceiveData));
@@ -80,78 +101,127 @@ public class SolderSimulator : MonoBehaviour
         // 1. スレッドから最新のイベントデータをコピー
         UdpEvent currentEvent = latestEventData;
 
-        // 2. 接触状態に応じて処理を分岐
+        // 2. (修正点2) イベントに応じて処理を分岐
         if (currentEvent.@event == "contact_ongoing")
         {
             HandleSoldering(currentEvent.temperature, currentEvent.angle);
         }
-        else // "no_contact"
+        else if (currentEvent.@event == "no_contact")
         {
             HandleNotSoldering();
         }
+        else if (currentEvent.@event == "judge")
+        {
+            HandleJudgment();
+            // 判定後はデータをリセットするため、"no_contact"状態に戻す
+            latestEventData = new UdpEvent { @event = "no_contact", temperature = currentEvent.temperature, angle = currentEvent.angle };
+        }
         
-        // 3. 描画を更新
-        UpdateSolderVisuals();
+        // 3. (修正点3) 毎フレームUIを更新
+        if (debugText != null)
+        {
+            UpdateDebugUI(currentEvent);
+        }
     }
 
-    // (ステップ2) 接触中の処理
+    // 接触中の処理
     private void HandleSoldering(float temp, float angle)
     {
-        // 判定フラグを立てる
+        // (修正点1) 最初の接触で表示を有効にする
+        if (!solderRenderer.enabled)
+        {
+            solderRenderer.enabled = true;
+        }
+
+        // (修正点2) 判定フラグを立てる
         needsJudging = true;
 
-        // 1. 温度係数をカーブから評価
-        // (例: 350℃ -> 1.0, 200℃ -> 0.0, 450℃ -> 0.3)
         float tempFactor = temperatureCurve.Evaluate(temp);
-        
-        // 2. 角度(面積)係数をカーブから評価
-        // (例: 45° -> 1.0, 0° -> 0.2, 90° -> 0.2)
         float angleFactor = angleCurve.Evaluate(angle);
-
-        // 3. このフレームでの増加量を計算
         float currentGrowthRate = baseGrowthRate * tempFactor * angleFactor;
         
-        // 4. 統計データを蓄積
         totalSolderVolume += currentGrowthRate * Time.deltaTime;
         totalContactTime += Time.deltaTime;
         
-        // (ステップ4用) 温度が不適正か判定
-        // (効率が 0.5 未満の領域を「不適正」とする)
         if (tempFactor < 0.5f)
         {
             timeInBadTempRange += Time.deltaTime;
         }
+        
+        // 接触中はリアルタイムで描画を更新
+        UpdateSolderVisuals();
     }
 
-    // (ステップ4) 非接触中の処理
+    // 非接触中の処理
     private void HandleNotSoldering()
     {
-        // 接触が終了した瞬間に、一度だけ判定を実行
-        if (needsJudging)
-        {
-            JudgeSoldering();
-            needsJudging = false; // 判定フラグを下ろす
-            
-            // 次のハンダ付けのために統計情報をリセット
-            totalSolderVolume = 0.0f;
-            totalContactTime = 0.0f;
-            timeInBadTempRange = 0.0f;
-        }
+        // (修正点2) 非接触時は何もしない（ハンダ量が保持される）
+        // （将来的にここで自然冷却のロジックなどを追加可能）
     }
 
-    // (ステップ3) 描画処理
+    // (修正点2) 判定実行の処理
+    private void HandleJudgment()
+    {
+        // 一度も接触していない場合は判定しない
+        if (!needsJudging)
+        {
+            Debug.LogWarning("No soldering contact detected. Judgment skipped.");
+            return;
+        }
+
+        // 判定ロジック本体を実行
+        JudgeSoldering();
+        
+        // 判定フラグと統計情報をリセット
+        needsJudging = false;
+        totalSolderVolume = 0.0f;
+        totalContactTime = 0.0f;
+        timeInBadTempRange = 0.0f;
+        
+        // 描画をリセット
+        UpdateSolderVisuals();
+        
+        // (修正点1) 描画を非表示に戻す
+        solderRenderer.enabled = false;
+    }
+
+    // 描画処理
     private void UpdateSolderVisuals()
     {
         if (solderMaterial != null)
         {
-            // シェーダーの "_SolderAmount" プロパティに、
-            // 計算した総ハンダ量に応じた変位スケールを渡す
             float displacement = totalSolderVolume * displacementScale;
             solderMaterial.SetFloat("_SolderAmount", displacement);
         }
     }
 
-    // (ステップ4) ハンダ付け判定ロジック
+    // (修正点3) デバッグUI更新ロジック
+    private void UpdateDebugUI(UdpEvent currentEvent)
+    {
+        uiStringBuilder.Clear();
+        uiStringBuilder.AppendLine("--- Solder Status (v2) ---");
+        
+        // 'judge'イベントは一瞬なので、表示上は直前の状態を保持
+        if(currentEvent.@event == "judge")
+        {
+            uiStringBuilder.AppendLine($"STATUS: Judging...");
+        }
+        else
+        {
+            uiStringBuilder.AppendLine($"STATUS: {currentEvent.@event}");
+        }
+        
+        uiStringBuilder.AppendLine($"TEMP: {currentEvent.temperature:F1} °C");
+        uiStringBuilder.AppendLine($"ANGLE: {currentEvent.angle:F1} °");
+        uiStringBuilder.AppendLine($"--- Statistics ---");
+        uiStringBuilder.AppendLine($"VOLUME: {totalSolderVolume:F2}");
+        uiStringBuilder.AppendLine($"TIME: {totalContactTime:F2} s");
+        uiStringBuilder.AppendLine($"Bad Temp Time: {timeInBadTempRange:F2} s");
+
+        debugText.text = uiStringBuilder.ToString();
+    }
+
+    // ハンダ付け判定ロジック (変更なし)
     private void JudgeSoldering()
     {
         Debug.Log("--- Soldering Judgment ---");
@@ -200,7 +270,6 @@ public class SolderSimulator : MonoBehaviour
                 byte[] data = client.Receive(ref anyIP);
                 string text = Encoding.UTF8.GetString(data);
 
-                // JSONをパースしてスレッドセーフな変数に格納
                 UdpEvent receivedEvent = JsonUtility.FromJson<UdpEvent>(text);
                 if (receivedEvent != null)
                 {
@@ -208,10 +277,7 @@ public class SolderSimulator : MonoBehaviour
                 }
             }
         }
-        catch (SocketException)
-        {
-            // アプリ終了時の正常な停止
-        }
+        catch (SocketException) { }
         catch (Exception e)
         {
             Debug.LogError($"Error in UDP thread: {e.Message}");
@@ -227,7 +293,6 @@ public class SolderSimulator : MonoBehaviour
 
     void OnApplicationQuit()
     {
-        // アプリ終了時にスレッドとクライアントを確実に閉じる
         if (client != null)
         {
             client.Close();
