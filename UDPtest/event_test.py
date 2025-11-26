@@ -41,6 +41,10 @@ def update_parameters():
     current_temperature = max(150.0, min(500.0, current_temperature))
     current_angle = max(0.0, min(90.0, current_angle))
     
+    # (修正点2) 終了判定キー
+    if keyboard.is_pressed('enter'):
+        return "judge"
+        
     # 接触状態の判定 (Space)
     if keyboard.is_pressed('space'):
         return "contact_ongoing"
@@ -50,10 +54,11 @@ def update_parameters():
 def print_status(event):
     """現在の状態をコンソールに表示する"""
     clear_console()
-    print("--- Python Solder Simulator ---")
+    print("--- Python Solder Simulator (v2) ---")
     print(f"Sending to {HOST}:{PORT} at {1/SEND_INTERVAL:.0f} Hz")
     print("\n--- Controls ---")
-    print("[Spacebar] : Hold to Solder (接触)")
+    print("[Spacebar] : Hold to Solder (接触/非接触)")
+    print("[Enter]    : Judge Soldering (終了判定)")
     print("[Up/Down]  : Change Temperature (温度)")
     print("[Left/Right]: Change Angle (角度)")
     print("\n--- Current Status ---")
@@ -65,6 +70,7 @@ def print_status(event):
 # --- メインループ ---
 print("Starting sender... (Hold Ctrl+C to stop)")
 time.sleep(1)
+last_event = ""
 
 try:
     while True:
@@ -72,7 +78,12 @@ try:
         event_type = update_parameters()
         
         # 2. 状態をコンソールに表示
-        print_status(event_type)
+        # (judgeイベントは単発なので、表示は継続的でなくてよい)
+        if event_type != "judge":
+            print_status(event_type)
+        else:
+            print(">>> Sending JUDGE event...")
+
         
         # 3. 送信するJSONデータを構築
         data = {
@@ -85,6 +96,11 @@ try:
         message = json.dumps(data)
         sock.sendto(message.encode('utf-8'), server_address)
         
+        # "judge"イベントは単発で送信し、すぐに次のループに移る
+        if event_type == "judge":
+            time.sleep(0.1) # 確実に送信するための短い待機
+            continue
+            
         # 5. 指定間隔待機
         time.sleep(SEND_INTERVAL)
 
