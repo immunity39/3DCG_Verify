@@ -72,8 +72,6 @@ SOLDER_BOARD_XY_THRESH = 0.05 # 5.0 cm (基板中心からのXY平面距離)
 TIP_SOLDER_DIST_THRESH = 0.02 # 2.0 cm (コテ先とハンダ間の3D距離)
 # 確認フレーム数（デバウンス）
 TOUCH_CONFIRM_FRAMES = 3
-# 接触状態フラグ
-TOUCH_FLAG = False
 
 # --- ログ出力 ---
 LOG_CSV = True
@@ -212,7 +210,6 @@ def camera_to_local(point_cam, T_inv):
     point_local_h = (T_inv @ point_cam_h)
     return point_local_h[:3]
 
-# --- (新規) 面積推定 ---
 def estimate_contact_area(R_plane_to_cube):
     if R_plane_to_cube is None:
         return 0.0, 0.0
@@ -245,7 +242,7 @@ def clear_console():
     """コンソールをクリアする"""
     os.system('cls' if os.name == 'nt' else 'clear')
 
-def update_parameters():
+def update_parameters(touch_flag):
     """キー入力に基づいてパラメータを更新する"""
     global current_temperature, current_angle
     
@@ -266,7 +263,7 @@ def update_parameters():
     current_angle = max(0.0, min(90.0, current_angle))
     
     # 接触状態の判定 (flag)
-    if TOUCH_FLAG == True:
+    if touch_flag:
         return "contact_ongoing"
     else:
         return "no_contact"
@@ -337,7 +334,7 @@ def main():
     count_tip_board = 0
     count_solder_board = 0
     count_tip_solder = 0
-    
+
     print("=== Soldering Tracking Start ===")
     print(f"Cube IDs: {CUBE_IDS}")
     print(f"Plane IDs: {PLANE_MARKER_IDS}")
@@ -346,9 +343,6 @@ def main():
 
     try:
         while True:
-            # 1. パラメータをキー入力で更新
-            event_type = update_parameters()
-            
             ret, frame = cap.read()
             if not ret: break
             if FLIP_FRAME:
@@ -592,8 +586,6 @@ def main():
             # 3者同時 (デバウンス後のフラグで判定)
             if touch_confirmed_tip_board and touch_confirmed_solder_board and touch_confirmed_tip_solder:
                 touch_confirmed_3way = True
-                TOUCH_FLAG = True  # グローバル変数に反映
-
 
             # --- (E) 描画とロギング ---
             
@@ -638,12 +630,14 @@ def main():
             cv2.putText(frame, f"Tip Tilt Angle: {tilt_angle:.1f} deg", (8, Y_INFO_START), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 100), 2)
             cv2.putText(frame, f"Est. Area: {estimated_area:.2f} (mm2)", (8, Y_INFO_START + Y_STEP), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 100), 2)
 
-
             # 手の検出ステータス (画面右上に表示)
             solder_hand_status = "OK" if hand_landmarks_solder else "N/A"
             iron_hand_status = "OK" if hand_landmarks_iron else "N/A"
             cv2.putText(frame, f"Solder Hand ({HAND_FOR_SOLDER}): {solder_hand_status}", (frame.shape[1] - 280, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 0), 2)
             cv2.putText(frame, f"Iron Hand ({HAND_FOR_IRON}): {iron_hand_status}", (frame.shape[1] - 280, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 0), 2)
+
+            # 1. パラメータをキー入力で更新
+            event_type = update_parameters(touch_confirmed_3way)
 
             # 2. 状態をコンソールに表示
             print_status(event_type)
