@@ -15,8 +15,10 @@ EditorBuildSettings:
     path: Assets/Samples/XERAL XR Plugin/3.0.0-pre.4/Camera Features/RGBCameraAndCapture/RGBCameraAndCapture.unity
     guid: 2d86868521ba3954d99c23196bc13949
   m_configObjects:
+    Unity.XR.Oculus.Settings: {fileID: 11400000, guid: 47632bc7c27e5c64faa0791c4e5e8fb3, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
     com.unity.xr.arfoundation.simulation_settings: {fileID: 11400000, guid: e4bba444e12763d4f999f48d88c6c1ba, type: 2}
     com.unity.xr.management.loader_settings: {fileID: 11400000, guid: b2c918e83698c384a9d9cf775c81eeb8, type: 2}
     com.unity.xr.management.xrealsettings: {fileID: 11400000, guid: c5e8529a8c16b444593fad5170e0165b, type: 2}
+    com.unity.xr.openxr.settings4: {fileID: 11400000, guid: 34f4e79be879e2b43a70b20678cc0138, type: 2}
   m_UseUCBPForAssetBundles: 0
